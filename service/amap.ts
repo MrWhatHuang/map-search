@@ -18,7 +18,7 @@ function randomDelay(min: number = 0, max: number = 0): Promise<void> {
 
 interface AmapPoiParams {
   keywords: string
-  region: string
+  region: string  // 注意：必须是城市级别，不能是省份（如：使用"南京市"而不是"江苏省"）
   pageSize?: number
   pageNum?: number
   key?: string

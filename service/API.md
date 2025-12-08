@@ -17,10 +17,10 @@
   - 返回：`{ code: 200, data: { status: 'ok', timestamp: string }, message: '成功' }`
 
 - `GET /api/poi/search`
-  - 描述：按关键词 + 行政区分页搜索（调用高德 API）。
+  - 描述：按关键词 + 城市分页搜索（调用高德 API）。
   - 查询参数：
     - `keywords` (string) 必需
-    - `region` (string) 必需
+    - `region` (string) 必需，**必须是城市级别**（如："南京市"），不能是省份（如："江苏省"）
     - `pageSize` (number, 可选, 默认 25)
     - `pageNum` (number, 可选, 默认 1)
     - `key` (string, 可选，高德 key)
@@ -28,18 +28,26 @@
 
 - `GET /api/poi/:keywords/:region`
   - 描述：简化单次搜索（path 参数形式）。
-  - Path 参数：`keywords`, `region`。可选 query `pageNum`。
+  - Path 参数：`keywords`, `region`（**必须是城市级别**）。可选 query `pageNum`。
   - 返回：同上。
 
 - `GET /api/regions`
-  - 描述：返回内置地区列表（来源 `service/regions.json`）。
+  - 描述：返回内置省份列表（来源 `service/regions.json`）。
   - 返回：`{ code:200, data: string[], message: '成功' }`
 
+- `GET /api/cities`
+  - 描述：返回所有城市列表（来源 `service/cities.json`）。
+  - 返回：`{ code:200, data: string[], message: '成功' }`
+
+- `GET /api/province-cities`
+  - 描述：返回省份到城市的映射关系。
+  - 返回：`{ code:200, data: Record<string, string[]>, message: '成功' }`
+
 - `POST /api/bulk-search`
-  - 描述：启动按关键词对全部地区批量搜索（同步接口，会在返回时给出概要，具体搜索会并发执行）。
+  - 描述：启动按关键词对指定城市批量搜索（同步接口，会在返回时给出概要，具体搜索会并发执行）。
   - Body：
     - `keywords` (string) 必需
-    - `regions` (string[]) 必需
+    - `regions` (string[]) 必需，**支持省份或城市**（省份会自动转换为城市列表）
     - `maxConcurrency` (number, 可选)
     - `delayMin`/`delayMax` (ms, 可选)
   - 返回 data 示例：
@@ -54,9 +62,9 @@
     ```
 
 - `GET /api/bulk-search/:keywords`
-  - 描述：快速触发后台异步批量搜索，使用内置全部地区（返回任务ID）。
+  - 描述：快速触发后台异步批量搜索，使用全部城市（自动从省份转换，返回任务ID）。
   - Query 可选：`maxConcurrency`, `delayMin`, `delayMax`。
-  - 返回 data 示例：`{ taskId, keyword, message, delayRange }`。
+  - 返回 data 示例：`{ taskId, keyword, message, delayRange, totalCities }`。
 
 - `GET /api/task/:taskId`
   - 描述：查询任务进度与状态（由 `task-manager` 管理）。

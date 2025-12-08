@@ -1,9 +1,14 @@
+// 加载环境变量（必须在其他导入之前）
+import 'dotenv/config'
+
 import express, { Express, Request, Response } from 'express'
 import cors from 'cors'
 import { searchAMapPoi } from './amap.js'
 import { bulkSearchByKeyword, getPoisByKeyword, listSavedKeywords } from './bulk-search.js'
 import { taskManager } from './task-manager.js'
 import regionsData from './regions.json' with { type: 'json' }
+import provinceToCities from './province-to-cities.json' with { type: 'json' }
+import citiesData from './cities.json' with { type: 'json' }
 import { config } from './config.js'
 import fs from 'fs/promises'
 import path from 'path'
@@ -87,7 +92,7 @@ app.get('/api/poi/:keywords/:region', async (req: Request, res: Response) => {
   }
 })
 
-// 获取所有地区列表
+// 获取所有地区列表（省份）
 app.get('/api/regions', (_req: Request, res: Response) => {
   res.json({
     code: 200,
@@ -96,7 +101,25 @@ app.get('/api/regions', (_req: Request, res: Response) => {
   })
 })
 
-// 批量搜索接口 - 指定关键词和并发数
+// 获取所有城市列表
+app.get('/api/cities', (_req: Request, res: Response) => {
+  res.json({
+    code: 200,
+    data: citiesData,
+    message: '成功'
+  })
+})
+
+// 获取省份到城市的映射
+app.get('/api/province-cities', (_req: Request, res: Response) => {
+  res.json({
+    code: 200,
+    data: provinceToCities,
+    message: '成功'
+  })
+})
+
+// 批量搜索接口 - 指定关键词和地区（支持省份或城市）
 app.post('/api/bulk-search', async (req: Request, res: Response) => {
   try {
     const {
@@ -115,26 +138,74 @@ app.post('/api/bulk-search', async (req: Request, res: Response) => {
       })
     }
 
-    const result = await bulkSearchByKeyword(keywords, regions, {
-      maxConcurrency,
-      delayMin,
-      delayMax
-    })
+    // 将省份转换为城市列表
+    const allProvinces = regionsData as string[]
+    const isProvince = (name: string) => allProvinces.includes(name)
+    const cities: string[] = []
+    const citySet = new Set<string>()
 
+    for (const region of regions) {
+      if (isProvince(region)) {
+        // 是省份，转换为城市列表
+        const provinceCities = (provinceToCities as Record<string, string[]>)[region] || []
+        for (const city of provinceCities) {
+          if (!citySet.has(city)) {
+            citySet.add(city)
+            cities.push(city)
+          }
+        }
+      } else {
+        // 是城市，直接添加
+        if (!citySet.has(region)) {
+          citySet.add(region)
+          cities.push(region)
+        }
+      }
+    }
+
+    if (cities.length === 0) {
+      return res.status(400).json({
+        code: 400,
+        message: '未找到有效的城市，请检查 regions 参数'
+      })
+    }
+
+    const concurrency = parseInt(String(maxConcurrency), 10) || config.bulkSearch.maxConcurrency
+    const minDelay = parseInt(String(delayMin), 10) || config.bulkSearch.delayMin
+    const maxDelay = parseInt(String(delayMax), 10) || config.bulkSearch.delayMax
+
+    // 创建任务（使用城市列表）
+    const taskId = taskManager.createTask(keywords, cities)
+    taskManager.startTask(taskId)
+
+    // 返回任务ID给客户端（异步执行）
     res.json({
       code: 200,
       data: {
-        keyword: result.keyword,
-        totalResults: result.totalResults,
-        filePath: result.filePath,
-        delayRange: `${delayMin}ms - ${delayMax}ms`,
-        regionSummary: result.regionResults.map(r => ({
-          region: r.region,
-          count: r.total
-        }))
+        taskId,
+        keyword: keywords,
+        message: '任务已创建，正在后台运行',
+        delayRange: `${minDelay}ms - ${maxDelay}ms`,
+        totalCities: cities.length
       },
-      message: '批量搜索完成'
+      message: '成功'
     })
+
+    // 后台异步执行搜索（使用城市列表）
+    bulkSearchByKeyword(keywords, cities, {
+      maxConcurrency: concurrency,
+      delayMin: minDelay,
+      delayMax: maxDelay,
+      taskId
+    })
+      .then((result) => {
+        taskManager.completeTask(taskId, result.filePath)
+        console.log(`✅ 任务 ${taskId} 已完成`)
+      })
+      .catch(error => {
+        taskManager.failTask(taskId, error instanceof Error ? error.message : '未知错误')
+        console.error(`❌ 任务 ${taskId} 失败:`, error)
+      })
   } catch (error) {
     console.error('批量搜索出错:', error)
     res.status(500).json({
@@ -145,7 +216,28 @@ app.post('/api/bulk-search', async (req: Request, res: Response) => {
   }
 })
 
-// 快速批量搜索 - 只需传入关键词，自动使用所有地区（后台异步执行）
+/**
+ * 将省份列表转换为城市列表
+ */
+function convertProvincesToCities(provinces: string[]): string[] {
+  const cities: string[] = []
+  const citySet = new Set<string>()
+
+  for (const province of provinces) {
+    // 查找省份对应的城市列表
+    const provinceCities = (provinceToCities as Record<string, string[]>)[province] || []
+    for (const city of provinceCities) {
+      if (!citySet.has(city)) {
+        citySet.add(city)
+        cities.push(city)
+      }
+    }
+  }
+
+  return cities
+}
+
+// 快速批量搜索 - 只需传入关键词，自动使用所有城市（后台异步执行）
 app.get('/api/bulk-search/:keywords', async (req: Request, res: Response) => {
   try {
     const { keywords } = req.params
@@ -155,13 +247,16 @@ app.get('/api/bulk-search/:keywords', async (req: Request, res: Response) => {
       delayMax = config.bulkSearch.delayMax
     } = req.query
 
-    const regions = regionsData as string[]
+    // 使用所有城市（从省份转换而来）
+    const allProvinces = regionsData as string[]
+    const cities = convertProvincesToCities(allProvinces)
+    
     const concurrency = parseInt(String(maxConcurrency), 10) || config.bulkSearch.maxConcurrency
     const minDelay = parseInt(String(delayMin), 10) || config.bulkSearch.delayMin
     const maxDelay = parseInt(String(delayMax), 10) || config.bulkSearch.delayMax
 
-    // 创建任务
-    const taskId = taskManager.createTask(keywords, regions)
+    // 创建任务（使用城市列表）
+    const taskId = taskManager.createTask(keywords, cities)
     taskManager.startTask(taskId)
 
     // 返回任务ID给客户端
@@ -171,13 +266,14 @@ app.get('/api/bulk-search/:keywords', async (req: Request, res: Response) => {
         taskId,
         keyword: keywords,
         message: '任务已创建，正在后台运行',
-        delayRange: `${minDelay}ms - ${maxDelay}ms`
+        delayRange: `${minDelay}ms - ${maxDelay}ms`,
+        totalCities: cities.length
       },
       message: '成功'
     })
 
-    // 后台异步执行搜索
-    bulkSearchByKeyword(keywords, regions, {
+    // 后台异步执行搜索（使用城市列表）
+    bulkSearchByKeyword(keywords, cities, {
       maxConcurrency: concurrency,
       delayMin: minDelay,
       delayMax: maxDelay,
@@ -279,8 +375,9 @@ app.get('/api/saved-pois/:keywords', async (req: Request, res: Response) => {
         data,
         message: '成功'
       })
-    } catch {
+    } catch (error) {
       // 文件不存在
+      console.log('文件不存在:', error instanceof Error ? error.message : String(error))
       return res.status(404).json({
         code: 404,
         message: `未找到"${keywords}"的数据，请先调用 /api/bulk-search/${keywords} 进行搜索`
@@ -356,7 +453,8 @@ app.get('/api/saved-pois/:keywords/:date', async (req: Request, res: Response) =
     try {
       const data = await fs.readFile(filePath, 'utf-8')
       return res.json({ code: 200, data: JSON.parse(data), message: '成功' })
-    } catch (err) {
+    } catch (error) {
+      console.log('文件不存在:', error instanceof Error ? error.message : String(error))
       return res.status(404).json({ code: 404, message: `未找到文件: ${fileName}` })
     }
   } catch (error) {
@@ -368,7 +466,7 @@ app.get('/api/saved-pois/:keywords/:date', async (req: Request, res: Response) =
 // 测试接口 - 并发请求高德API
 app.get('/api/test/concurrent', async (req: Request, res: Response) => {
   try {
-    const { keywords = '古茗', region = '江苏省', count = 5 } = req.query
+    const { keywords = '古茗', region = '南京市', count = 5 } = req.query
     const concurrentCount = parseInt(String(count), 10) || 5
 
     if (concurrentCount < 1 || concurrentCount > 50) {

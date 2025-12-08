@@ -90,7 +90,33 @@ function generateProgressBar(current: number, total: number, regionName: string 
 }
 
 /**
- * 搜索单个地区的所有数据（支持翻页并发控制）
+ * 过滤POI数据，只保留名称包含关键词的POI
+ * @param pois POI数组
+ * @param keywords 搜索关键词
+ * @returns 过滤后的POI数组
+ */
+function filterPoisByKeyword(pois: Poi[], keywords: string): Poi[] {
+  if (!keywords || keywords.trim() === '') {
+    return pois
+  }
+  
+  const keywordLower = keywords.toLowerCase().trim()
+  const filtered = pois.filter((poi) => {
+    const name = (poi.name || '').toLowerCase()
+    return name.includes(keywordLower)
+  })
+  
+  if (filtered.length < pois.length) {
+    const filteredCount = pois.length - filtered.length
+    console.log(`  ⚠️  过滤掉 ${filteredCount} 个不包含关键词"${keywords}"的POI`)
+  }
+  
+  return filtered
+}
+
+/**
+ * 搜索单个城市的所有数据（支持翻页并发控制）
+ * 注意：region 参数必须是城市级别，不能是省份
  */
 async function searchRegion(
   keywords: string,
@@ -119,7 +145,9 @@ async function searchRegion(
     })
 
     if (firstResult.pois && firstResult.pois.length > 0) {
-      pois.push(...firstResult.pois)
+      // 过滤POI，只保留名称包含关键词的
+      const filteredPois = filterPoisByKeyword(firstResult.pois, keywords)
+      pois.push(...filteredPois)
 
       // 如果第一页就少于25条，说明只有一页
       if (firstResult.pois.length < 25) {
@@ -156,7 +184,9 @@ async function searchRegion(
         })
 
         if (result.pois && result.pois.length > 0) {
-          pois.push(...result.pois)
+          // 过滤POI，只保留名称包含关键词的
+          const filteredPois = filterPoisByKeyword(result.pois, keywords)
+          pois.push(...filteredPois)
 
           // 如果返回的数据少于25条，表示已获取全部数据
           if (result.pois.length < 25) {
@@ -214,7 +244,7 @@ export async function bulkSearchByKeyword(
 
   const displayId = taskId || 'direct'
   console.log(`\n🚀 开始批量搜索关键词: "${keywords}" (任务ID: ${displayId})`)
-  console.log(`📊 总地区数: ${regions.length}, 最大并发数: ${maxConcurrency}`)
+  console.log(`📊 总城市数: ${regions.length}, 最大并发数: ${maxConcurrency}`)
   if (delayMin > 0 || delayMax > 0) {
     console.log(`⏱️  请求延迟范围: ${delayMin}ms - ${delayMax}ms\n`)
   } else {
@@ -236,7 +266,7 @@ export async function bulkSearchByKeyword(
       // 更新进度条
       const bar = generateProgressBar(completedRegions, regions.length, region)
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
-      console.log(`[${elapsed}s] ${bar}`)
+      console.log(`[${elapsed}s] ${bar} (城市: ${region})`)
 
       if (taskId) {
         taskManager.updateProgress(taskId, completedRegions, {
