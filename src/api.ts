@@ -69,6 +69,33 @@ export async function get(path: string) {
   return fetchWithFallback(path)
 }
 
+export async function post(path: string, body?: any) {
+  await tryInitAlova()
+  if (alovaClient && typeof alovaClient.post === 'function') {
+    try {
+      const req = alovaClient.post(path, body)
+      if (typeof req.send === 'function') {
+        const r = await req.send()
+        return r.data ?? r
+      }
+      const r2 = await req.request?.()
+      return r2?.data ?? r2
+    } catch {
+      return fetchWithFallback(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+    }
+  }
+
+  return fetchWithFallback(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+}
+
 export async function getJson(url: string) {
   // 直接走 fetch（用于外部任意URL）
   const res = await fetch(url)
@@ -76,4 +103,4 @@ export async function getJson(url: string) {
   return res.json()
 }
 
-export default { setApiBase, get, getJson }
+export default { setApiBase, get, post, getJson }
