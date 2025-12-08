@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../../api'
 import { API_BASE_URL } from '../../config'
 import ProvinceTable from './components/ProvinceTable.vue'
 import CityDetailsModal from './components/CityDetailsModal.vue'
 import AmapView, { type PoiItem } from '../../components/AmapView.vue'
+
+const router = useRouter()
 
 const keywords = ref<string[]>([])
 const selectedKeyword = ref<string | null>(null)
@@ -22,6 +25,7 @@ const pois = ref<Array<Record<string, any>>>([])
 const detailModalVisible = ref(false)
 const detailProvince = ref<string | null>(null)
 const detailCityGroups = ref<Array<{ city: string; count: number }>>([])
+const detailProvincePois = ref<Array<Record<string, any>>>([])
 
 // 当前激活的页签
 const activeTab = ref('table')
@@ -131,6 +135,8 @@ function openDetailsForProvince(prov: string) {
   detailCityGroups.value = Object.keys(map)
     .map((c) => ({ city: c, count: map[c] }))
     .sort((a, b) => b.count - a.count)
+  // 保存该省份的 POI 数据用于地图展示
+  detailProvincePois.value = filtered
   detailModalVisible.value = true
 }
 
@@ -164,8 +170,13 @@ watch(selectedDate, (d) => {
 <template>
   <div class="data-view-container">
     <div class="page-header">
-      <h1 class="page-title">POI 数据展示</h1>
-      <p class="page-subtitle">查看已采集的兴趣点数据在全国的分布情况</p>
+      <div class="header-content">
+        <div>
+          <h1 class="page-title">POI 数据展示</h1>
+          <p class="page-subtitle">查看已采集的兴趣点数据在全国的分布情况</p>
+        </div>
+        <el-button type="primary" @click="router.push('/')"> ← 返回首页 </el-button>
+      </div>
     </div>
 
     <div class="content-card">
@@ -278,6 +289,7 @@ watch(selectedDate, (d) => {
       v-model:visible="detailModalVisible"
       :province="detailProvince"
       :rows="detailCityGroups"
+      :pois="detailProvincePois"
     />
   </div>
 </template>
@@ -291,6 +303,13 @@ watch(selectedDate, (d) => {
 
 .page-header {
   margin-bottom: 24px;
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
 }
 
 .page-title {
@@ -463,6 +482,11 @@ watch(selectedDate, (d) => {
 @media (max-width: 768px) {
   .data-view-container {
     padding: 16px;
+  }
+
+  .header-content {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .page-title {
