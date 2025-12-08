@@ -1,13 +1,56 @@
 /**
  * 服务配置文件
+ * 支持从环境变量读取配置
  */
+
+// 从环境变量读取配置，如果必需配置缺失则抛出错误
+const getEnv = (key: string, defaultValue?: string): string => {
+  const value = process.env[key]
+  if (!value || value.trim() === '') {
+    if (defaultValue !== undefined) {
+      return defaultValue
+    }
+    throw new Error(
+      `❌ 环境变量 ${key} 未配置！\n` +
+      `请在 .env 文件中设置 ${key} 环境变量。`
+    )
+  }
+  return value
+}
+
+// 验证必需的环境变量
+const validateRequiredEnv = () => {
+  const requiredVars = ['AMAP_KEY']
+  const missing: string[] = []
+
+  for (const varName of requiredVars) {
+    if (!process.env[varName] || process.env[varName]!.trim() === '') {
+      missing.push(varName)
+    }
+  }
+
+  if (missing.length > 0) {
+    console.error('\n❌ 缺少必需的环境变量配置：')
+    missing.forEach(varName => {
+      console.error(`   - ${varName}`)
+    })
+    console.error('\n请在项目根目录创建 .env 文件并配置以下变量：')
+    console.error('   AMAP_KEY=your_web_service_api_key')
+    console.error('\n获取 Key: https://console.amap.com/dev/key/app')
+    console.error('Key 类型: Web 服务\n')
+    process.exit(1)
+  }
+}
+
+// 启动时验证配置
+validateRequiredEnv()
 
 export const config = {
   // API端口
-  port: 3000,
+  port: parseInt(getEnv('PORT', '3000'), 10),
 
-  // 高德API密钥
-  amapKey: 'ee0eeaabf7b9b44be3ed8c0e37aa1d89',
+  // 高德API密钥（必须配置，从环境变量读取）
+  amapKey: getEnv('AMAP_KEY'),
 
   // 批量搜索配置
   bulkSearch: {
