@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "dev:server": "node --import tsx ./service/server.ts",
+    "dev:server": "node --import tsx ./service/src/server.ts",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",

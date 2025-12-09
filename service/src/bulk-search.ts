@@ -6,7 +6,7 @@ import { taskManager } from './task-manager.js'
 import { config } from './config.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = path.join(__dirname, '..', 'public', 'poi-data')
+const DATA_DIR = path.join(__dirname, '..', '..', 'public', 'poi-data')
 
 interface BulkSearchOptions {
   maxConcurrency?: number
@@ -283,15 +283,21 @@ export async function bulkSearchByKeyword(
   // 合并所有结果
   const allPois = regionResults.flatMap(r => r.pois)
 
+  // 按省份聚合 regionBreakdown（使用 POI 数据中的 pname 字段）
+  const provinceMap = new Map<string, number>()
+  for (const poi of allPois) {
+    const province = (poi.pname as string) || '未知'
+    provinceMap.set(province, (provinceMap.get(province) || 0) + 1)
+  }
+
   // 构建结果对象
   const result = {
     keyword: keywords,
     timestamp: new Date().toISOString(),
     totalCount: allPois.length,
-    regionBreakdown: regionResults.map(r => ({
-      region: r.region,
-      count: r.total
-    })),
+    regionBreakdown: Array.from(provinceMap.entries())
+      .map(([region, count]) => ({ region, count }))
+      .sort((a, b) => b.count - a.count), // 按数量降序排列
     pois: allPois
   }
 

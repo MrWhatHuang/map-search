@@ -12,9 +12,9 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const excelPath = path.join(__dirname, 'AMap_adcode_citycode.xlsx')
-const outputPath = path.join(__dirname, 'province-to-cities.json')
-const citiesOutputPath = path.join(__dirname, 'cities.json')
+const excelPath = path.join(__dirname, '..', 'AMap_adcode_citycode.xlsx')
+const outputPath = path.join(__dirname, '..', 'data', 'province-to-cities.json')
+const citiesOutputPath = path.join(__dirname, '..', 'data', 'cities.json')
 
 // 省份代码映射（前2位）
 const provinceCodeMap: Record<string, string> = {

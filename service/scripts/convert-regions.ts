@@ -9,8 +9,8 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const excelPath = path.join(__dirname, 'AMap_adcode_citycode.xlsx')
-const outputPath = path.join(__dirname, 'cities.json')
+const excelPath = path.join(__dirname, '..', 'AMap_adcode_citycode.xlsx')
+const outputPath = path.join(__dirname, '..', 'data', 'cities.json')
 
 interface CityInfo {
   name: string
@@ -77,7 +77,7 @@ async function convertExcelToJson() {
     console.log(`✅ 城市列表已保存到: ${outputPath}`)
 
     // 同时保存详细信息的映射
-    const detailPath = path.join(__dirname, 'cities-detail.json')
+    const detailPath = path.join(__dirname, '..', 'data', 'cities-detail.json')
     await fs.writeFile(detailPath, JSON.stringify(cityMap, null, 2), 'utf-8')
     console.log(`✅ 城市详细信息已保存到: ${detailPath}`)
 

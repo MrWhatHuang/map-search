@@ -76,7 +76,7 @@ function initMap() {
 
   try {
     const centerPoint = parseLocation(props.center)
-    
+
     mapInstance.value = new (window as any).AMap.Map(mapContainer.value, {
       zoom: props.zoom,
       center: centerPoint,
@@ -117,20 +117,34 @@ function addMarkers(pois: PoiItem[]) {
 
   pois.forEach((poi) => {
     try {
-      const location = typeof poi.location === 'string' || Array.isArray(poi.location) 
-        ? poi.location 
-        : String(poi.location)
+      const location =
+        typeof poi.location === 'string' || Array.isArray(poi.location)
+          ? poi.location
+          : String(poi.location)
       const [lng, lat] = parseLocation(location)
-      
+
       // 创建标记
       const marker = new (window as any).AMap.Marker({
         position: [lng, lat],
         title: poi.name,
         label: {
-          content: poi.name,
-          direction: 'right',
-          offset: [10, 0],
+          content: '',
+          direction: 'top',
+          offset: [0, -5],
         },
+      })
+      marker.on('mouseover', () => {
+        marker.setLabel({
+          content: poi.name,
+          direction: 'top',
+          offset: [0, -5],
+        })
+        marker.updateOverlay()
+      })
+      marker.on('mouseout', () => {
+        marker.setLabel({
+          content: '',
+        })
       })
 
       // 添加点击事件
@@ -141,7 +155,6 @@ function addMarkers(pois: PoiItem[]) {
               <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600;">${poi.name}</h3>
               ${poi.address ? `<p style="margin: 4px 0; color: #666; font-size: 14px;">📍 ${poi.address}</p>` : ''}
               ${poi.type ? `<p style="margin: 4px 0; color: #999; font-size: 12px;">类型: ${poi.type}</p>` : ''}
-              ${poi.tel ? `<p style="margin: 4px 0; color: #999; font-size: 12px;">电话: ${poi.tel}</p>` : ''}
             </div>
           `
           infoWindow.value.setContent(content)
@@ -173,7 +186,7 @@ function clearMarkers() {
     marker.off('click')
   })
   markers.value = []
-  
+
   if (infoWindow.value) {
     infoWindow.value.close()
   }
@@ -200,7 +213,7 @@ watch(
       addMarkers(newPois)
     }
   },
-  { deep: true }
+  { deep: true },
 )
 
 // 监听中心点变化
@@ -292,4 +305,3 @@ onUnmounted(() => {
   font-size: 14px;
 }
 </style>
-

@@ -6,9 +6,9 @@ import cors from 'cors'
 import { searchAMapPoi } from './amap.js'
 import { bulkSearchByKeyword, getPoisByKeyword, listSavedKeywords } from './bulk-search.js'
 import { taskManager } from './task-manager.js'
-import regionsData from './regions.json' with { type: 'json' }
-import provinceToCities from './province-to-cities.json' with { type: 'json' }
-import citiesData from './cities.json' with { type: 'json' }
+import regionsData from '../data/regions.json' with { type: 'json' }
+import provinceToCities from '../data/province-to-cities.json' with { type: 'json' }
+import citiesData from '../data/cities.json' with { type: 'json' }
 import { config } from './config.js'
 import fs from 'fs/promises'
 import path from 'path'
@@ -18,7 +18,7 @@ const app: Express = express()
 const PORT = config.port
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = path.join(__dirname, '..', 'public', 'poi-data')
+const DATA_DIR = path.join(__dirname, '..', '..', 'public', 'poi-data')
 
 // 中间件
 app.use(cors())
@@ -146,10 +146,18 @@ app.post('/api/bulk-search', async (req: Request, res: Response) => {
 
     for (const region of regions) {
       if (isProvince(region)) {
-        // 是省份，转换为城市列表
+        // 是省份，转换为城市列表（过滤掉非直辖市的省份本身）
         const provinceCities = (provinceToCities as Record<string, string[]>)[region] || []
         for (const city of provinceCities) {
-          if (!citySet.has(city)) {
+          // 过滤逻辑：
+          // 1. 如果是直辖市（如"北京市"），保留（因为本身就是城市级别）
+          // 2. 如果是普通省份（如"江苏省"），过滤掉（因为不是城市级别）
+          // 3. 其他地级市保留
+          const shouldInclude = !citySet.has(city) && (
+            !isProvince(city) || isMunicipality(city)
+          )
+          
+          if (shouldInclude) {
             citySet.add(city)
             cities.push(city)
           }
@@ -217,17 +225,35 @@ app.post('/api/bulk-search', async (req: Request, res: Response) => {
 })
 
 /**
+ * 判断是否是直辖市（名称以"市"结尾且在regions.json中）
+ */
+function isMunicipality(name: string): boolean {
+  const provinces = regionsData as string[]
+  return provinces.includes(name) && name.endsWith('市')
+}
+
+/**
  * 将省份列表转换为城市列表
+ * 注意：过滤掉非直辖市的省份本身，只保留地级市（高德API的region参数只支持城市级别）
  */
 function convertProvincesToCities(provinces: string[]): string[] {
   const cities: string[] = []
   const citySet = new Set<string>()
+  const provincesSet = new Set(regionsData as string[])
 
   for (const province of provinces) {
     // 查找省份对应的城市列表
     const provinceCities = (provinceToCities as Record<string, string[]>)[province] || []
     for (const city of provinceCities) {
-      if (!citySet.has(city)) {
+      // 过滤逻辑：
+      // 1. 如果是直辖市（如"北京市"），保留（因为本身就是城市级别）
+      // 2. 如果是普通省份（如"江苏省"），过滤掉（因为不是城市级别）
+      // 3. 其他地级市保留
+      const shouldInclude = !citySet.has(city) && (
+        !provincesSet.has(city) || isMunicipality(city)
+      )
+      
+      if (shouldInclude) {
         citySet.add(city)
         cities.push(city)
       }
@@ -235,6 +261,63 @@ function convertProvincesToCities(provinces: string[]): string[] {
   }
 
   return cities
+}
+
+/**
+ * 判断一个名称是否是省份/直辖市（在 regions.json 中）
+ */
+function isProvinceOrMunicipality(name: string): boolean {
+  const provinces = regionsData as string[]
+  return provinces.includes(name)
+}
+
+/**
+ * 将城市名转换为省份名（使用反向映射）
+ */
+function convertCityToProvince(cityName: string): string | null {
+  // 如果本身就是省份/直辖市，直接返回
+  if (isProvinceOrMunicipality(cityName)) {
+    return cityName
+  }
+  
+  // 尝试在省份到城市的映射中查找
+  const mapping = provinceToCities as Record<string, string[]>
+  for (const [province, cities] of Object.entries(mapping)) {
+    if (cities.includes(cityName)) {
+      return province
+    }
+  }
+  
+  return null
+}
+
+/**
+ * 将城市级别的 regionBreakdown 转换为省份级别
+ * 只保留省/直辖市，过滤掉无法转换的城市
+ */
+function convertRegionBreakdownToProvinces(
+  regionBreakdown: Array<{ region: string; count: number }>
+): Array<{ region: string; count: number }> {
+  const provinceMap = new Map<string, number>()
+
+  for (const item of regionBreakdown) {
+    // 先检查是否是省份/直辖市
+    if (isProvinceOrMunicipality(item.region)) {
+      // 直接使用省份名
+      provinceMap.set(item.region, (provinceMap.get(item.region) || 0) + item.count)
+    } else {
+      // 尝试转换为省份
+      const province = convertCityToProvince(item.region)
+      if (province) {
+        provinceMap.set(province, (provinceMap.get(province) || 0) + item.count)
+      }
+      // 如果无法转换，跳过（不添加到结果中）
+    }
+  }
+
+  return Array.from(provinceMap.entries())
+    .map(([region, count]) => ({ region, count }))
+    .sort((a, b) => b.count - a.count)
 }
 
 // 快速批量搜索 - 只需传入关键词，自动使用所有城市（后台异步执行）
@@ -370,6 +453,20 @@ app.get('/api/saved-pois/:keywords', async (req: Request, res: Response) => {
     try {
       // 尝试获取已保存的数据
       const data = await getPoisByKeyword(keywords)
+      
+      // 如果 regionBreakdown 包含城市，转换为省份统计
+      if (data.regionBreakdown && Array.isArray(data.regionBreakdown)) {
+        // 检查是否包含非省份/直辖市的条目（即包含城市）
+        const hasCities = data.regionBreakdown.some(
+          item => !isProvinceOrMunicipality(item.region)
+        )
+        
+        // 如果包含城市，需要转换
+        if (hasCities) {
+          data.regionBreakdown = convertRegionBreakdownToProvinces(data.regionBreakdown)
+        }
+      }
+      
       return res.json({
         code: 200,
         data,
@@ -452,7 +549,22 @@ app.get('/api/saved-pois/:keywords/:date', async (req: Request, res: Response) =
 
     try {
       const data = await fs.readFile(filePath, 'utf-8')
-      return res.json({ code: 200, data: JSON.parse(data), message: '成功' })
+      const fileData = JSON.parse(data)
+      
+      // 如果 regionBreakdown 包含城市，转换为省份统计
+      if (fileData.regionBreakdown && Array.isArray(fileData.regionBreakdown)) {
+        // 检查是否包含非省份/直辖市的条目（即包含城市）
+        const hasCities = fileData.regionBreakdown.some(
+          item => !isProvinceOrMunicipality(item.region)
+        )
+        
+        // 如果包含城市，需要转换
+        if (hasCities) {
+          fileData.regionBreakdown = convertRegionBreakdownToProvinces(fileData.regionBreakdown)
+        }
+      }
+      
+      return res.json({ code: 200, data: fileData, message: '成功' })
     } catch (error) {
       console.log('文件不存在:', error instanceof Error ? error.message : String(error))
       return res.status(404).json({ code: 404, message: `未找到文件: ${fileName}` })

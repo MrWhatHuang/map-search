@@ -3,7 +3,7 @@
  * 从 cities-detail.json 生成省份到城市列表的映射
  */
 
-import citiesDetail from './cities-detail.json' with { type: 'json' }
+import citiesDetail from '../data/cities-detail.json' with { type: 'json' }
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -103,7 +103,7 @@ async function generateProvinceToCities() {
     mapping[province].sort()
   }
 
-  const outputPath = path.join(__dirname, 'province-to-cities.json')
+  const outputPath = path.join(__dirname, '..', 'data', 'province-to-cities.json')
   await fs.writeFile(outputPath, JSON.stringify(mapping, null, 2), 'utf-8')
   console.log(`✅ 省份到城市映射已保存到: ${outputPath}`)
   console.log(`   共 ${Object.keys(mapping).length} 个省份`)
