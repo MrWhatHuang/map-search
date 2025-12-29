@@ -20,7 +20,7 @@ const getEnv = (key: string, defaultValue?: string): string => {
 
 // 验证必需的环境变量
 const validateRequiredEnv = () => {
-  const requiredVars = ['AMAP_KEY']
+  const requiredVars = ['AMAP_KEY', 'DATABASE_URL']
   const missing: string[] = []
 
   for (const varName of requiredVars) {
@@ -36,8 +36,10 @@ const validateRequiredEnv = () => {
     })
     console.error('\n请在项目根目录创建 .env 文件并配置以下变量：')
     console.error('   AMAP_KEY=your_web_service_api_key')
+    console.error('   DATABASE_URL=postgresql://user:password@localhost:5432/map_search')
     console.error('\n获取 Key: https://console.amap.com/dev/key/app')
-    console.error('Key 类型: Web 服务\n')
+    console.error('Key 类型: Web 服务')
+    console.error('数据库: 请先创建 PostgreSQL 数据库\n')
     process.exit(1)
   }
 }

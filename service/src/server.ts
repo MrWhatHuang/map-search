@@ -4,12 +4,13 @@ import 'dotenv/config'
 import express, { Express, Request, Response } from 'express'
 import cors from 'cors'
 import { searchAMapPoi } from './amap.js'
-import { bulkSearchByKeyword, getPoisByKeyword, listSavedKeywords } from './bulk-search.js'
+import { bulkSearchByKeyword, getPoisByKeyword, listSavedKeywords, getKeywordDates } from './bulk-search.js'
 import { taskManager } from './task-manager.js'
 import regionsData from '../data/regions.json' with { type: 'json' }
 import provinceToCities from '../data/province-to-cities.json' with { type: 'json' }
 import citiesData from '../data/cities.json' with { type: 'json' }
 import { config } from './config.js'
+import { prisma } from './db.js'
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -17,8 +18,9 @@ import { fileURLToPath } from 'url'
 const app: Express = express()
 const PORT = config.port
 
+// 注意：DATA_DIR 已不再使用，数据现在存储在数据库中
+// 保留此变量用于兼容性（如果有其他地方引用）
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = path.join(__dirname, '..', '..', 'public', 'poi-data')
 
 // 中间件
 app.use(cors())
@@ -207,7 +209,7 @@ app.post('/api/bulk-search', async (req: Request, res: Response) => {
       taskId
     })
       .then((result) => {
-        taskManager.completeTask(taskId, result.filePath)
+        taskManager.completeTask(taskId, result.filePath || undefined)
         console.log(`✅ 任务 ${taskId} 已完成`)
       })
       .catch(error => {
@@ -363,7 +365,7 @@ app.get('/api/bulk-search/:keywords', async (req: Request, res: Response) => {
       taskId
     })
       .then((result) => {
-        taskManager.completeTask(taskId, result.filePath)
+        taskManager.completeTask(taskId, result.filePath || undefined)
         console.log(`✅ 任务 ${taskId} 已完成`)
       })
       .catch(error => {
@@ -512,26 +514,11 @@ app.get('/api/saved-keywords', async (_req: Request, res: Response) => {
 app.get('/api/saved-files/:keywords', async (req: Request, res: Response) => {
   try {
     const { keywords } = req.params
+    const dates = await getKeywordDates(keywords)
 
-    // 读取数据目录中的文件
-    const files = await fs.readdir(DATA_DIR)
-    const prefix = `${keywords}_`
-    const matching = files.filter(f => f.startsWith(prefix) && f.endsWith('.json'))
-
-    if (matching.length === 0) {
+    if (dates.length === 0) {
       return res.status(404).json({ code: 404, data: [], message: '未找到可用的日期文件' })
     }
-
-    // 提取日期部分 YYYY-MM-DD
-    const dates = matching
-      .map(f => {
-        const m = f.match(new RegExp(`^${keywords}_(\\d{4}-\\d{2}-\\d{2})\\.json$`))
-        return m ? m[1] : null
-      })
-      .filter(Boolean) as string[]
-
-    // 按日期降序排列（最新在前）
-    dates.sort().reverse()
 
     res.json({ code: 200, data: dates, message: '成功' })
   } catch (error) {
@@ -544,12 +531,9 @@ app.get('/api/saved-files/:keywords', async (req: Request, res: Response) => {
 app.get('/api/saved-pois/:keywords/:date', async (req: Request, res: Response) => {
   try {
     const { keywords, date } = req.params
-    const fileName = `${keywords}_${date}.json`
-    const filePath = path.join(DATA_DIR, fileName)
 
     try {
-      const data = await fs.readFile(filePath, 'utf-8')
-      const fileData = JSON.parse(data)
+      const fileData = await getPoisByKeyword(keywords, date)
       
       // 如果 regionBreakdown 包含城市，转换为省份统计
       if (fileData.regionBreakdown && Array.isArray(fileData.regionBreakdown)) {
@@ -566,8 +550,8 @@ app.get('/api/saved-pois/:keywords/:date', async (req: Request, res: Response) =
       
       return res.json({ code: 200, data: fileData, message: '成功' })
     } catch (error) {
-      console.log('文件不存在:', error instanceof Error ? error.message : String(error))
-      return res.status(404).json({ code: 404, message: `未找到文件: ${fileName}` })
+      console.log('数据不存在:', error instanceof Error ? error.message : String(error))
+      return res.status(404).json({ code: 404, message: `未找到关键词 "${keywords}" 在日期 "${date}" 的数据` })
     }
   } catch (error) {
     console.error('按日期获取已保存数据出错:', error)
@@ -655,7 +639,17 @@ app.get('/api/test/concurrent', async (req: Request, res: Response) => {
 })
 
 // 启动服务器
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
+  // 测试数据库连接
+  try {
+    await prisma.$connect()
+    console.log('✅ 数据库连接成功')
+  } catch (error) {
+    console.error('❌ 数据库连接失败:', error)
+    console.error('请检查 DATABASE_URL 环境变量配置')
+    process.exit(1)
+  }
+  
   console.log(`🚀 服务器运行在 http://localhost:${PORT}`)
   console.log(`\n📍 单地区搜索:`)
   console.log(`   GET /api/poi/search?keywords=古茗&region=江苏省`)
@@ -672,5 +666,5 @@ app.listen(PORT, () => {
   console.log(`\n🌍 地区列表:`)
   console.log(`   GET /api/regions`)
   console.log(`\n🧪 测试接口:`)
-  console.log(`   GET /api/test/concurrent?keywords=古茗&region=江苏省&count=5`)
+  console.log(`   GET /api/test/concurrent?keywords=古茗&region=南京市&count=5`)
 })

@@ -1,12 +1,7 @@
-import fs from 'fs/promises'
-import path from 'path'
-import { fileURLToPath } from 'url'
 import { searchAMapPoi } from './amap.js'
 import { taskManager } from './task-manager.js'
 import { config } from './config.js'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = path.join(__dirname, '..', '..', 'public', 'poi-data')
+import { prisma } from './db.js'
 
 interface BulkSearchOptions {
   maxConcurrency?: number
@@ -28,13 +23,23 @@ interface SearchResult {
   total: number
 }
 
-// 创建数据目录
-async function ensureDataDir() {
+/**
+ * 解析经纬度字符串 "经度,纬度" 并提取数值
+ */
+function parseLocation(location: string): { longitude: number; latitude: number } | null {
   try {
-    await fs.access(DATA_DIR)
+    const parts = location.split(',')
+    if (parts.length >= 2) {
+      const lng = parseFloat(parts[0]?.trim() || '0')
+      const lat = parseFloat(parts[1]?.trim() || '0')
+      if (!isNaN(lng) && !isNaN(lat)) {
+        return { longitude: lng, latitude: lat }
+      }
+    }
   } catch {
-    await fs.mkdir(DATA_DIR, { recursive: true })
+    // 忽略解析错误
   }
+  return null
 }
 
 /**
@@ -240,8 +245,6 @@ export async function bulkSearchByKeyword(
 }> {
   const { maxConcurrency = 2, taskId, delayMin = 0, delayMax = 0 } = options
 
-  await ensureDataDir()
-
   const displayId = taskId || 'direct'
   console.log(`\n🚀 开始批量搜索关键词: "${keywords}" (任务ID: ${displayId})`)
   console.log(`📊 总城市数: ${regions.length}, 最大并发数: ${maxConcurrency}`)
@@ -290,67 +293,173 @@ export async function bulkSearchByKeyword(
     provinceMap.set(province, (provinceMap.get(province) || 0) + 1)
   }
 
-  // 构建结果对象
-  const result = {
-    keyword: keywords,
-    timestamp: new Date().toISOString(),
-    totalCount: allPois.length,
-    regionBreakdown: Array.from(provinceMap.entries())
-      .map(([region, count]) => ({ region, count }))
-      .sort((a, b) => b.count - a.count), // 按数量降序排列
-    pois: allPois
+  const regionBreakdown = Array.from(provinceMap.entries())
+    .map(([region, count]) => ({ region, count }))
+    .sort((a, b) => b.count - a.count)
+
+  // 保存到数据库
+  const searchDate = new Date()
+  searchDate.setHours(0, 0, 0, 0) // 只保留日期部分
+
+  // 批量插入 POI 数据
+  console.log(`\n💾 开始保存 ${allPois.length} 条POI到数据库...`)
+  
+  // 准备批量插入数据
+  const batchSize = 1000
+  for (let i = 0; i < allPois.length; i += batchSize) {
+    const batch = allPois.slice(i, i + batchSize)
+    const poiData = batch.map((poi) => {
+      const location = parseLocation(poi.location as string)
+      // 提取其他字段到 extraData
+      const { id, name, type, typecode, biz_type, address, location: loc, tel, distance, business_area, navi_poiid, pcode, adcode, pname, cityname, ...extra } = poi as any
+      
+      return {
+        amapId: id as string,
+        keyword: keywords,
+        searchDate: searchDate,
+        name: name as string,
+        type: type as string,
+        typecode: typecode as string,
+        bizType: biz_type as string,
+        address: address as string,
+        location: loc as string,
+        longitude: location?.longitude,
+        latitude: location?.latitude,
+        tel: tel as string,
+        distance: distance as string,
+        businessArea: business_area as string,
+        naviPoiid: navi_poiid as string,
+        province: pcode as string,
+        city: adcode as string,
+        pname: pname as string,
+        cityname: cityname as string,
+        extraData: extra, // 保存其他扩展字段
+      }
+    })
+    
+    // 使用 createMany 批量插入（更高效）
+    await prisma.poi.createMany({
+      data: poiData,
+      skipDuplicates: true, // 跳过重复数据（基于唯一约束）
+    })
+    
+    console.log(`  已保存 ${Math.min(i + batchSize, allPois.length)} / ${allPois.length} 条`)
   }
 
-  // 生成带日期的文件名 (格式: 关键词_YYYY-MM-DD.json)
-  const today = new Date().toISOString().split('T')[0]
-  const fileName = `${keywords}_${today}.json`
-  const filePath = path.join(DATA_DIR, fileName)
-
-  await fs.writeFile(filePath, JSON.stringify(result, null, 2), 'utf-8')
+  // 创建或更新搜索记录
+  await prisma.searchRecord.upsert({
+    where: {
+      keyword_searchDate: {
+        keyword: keywords,
+        searchDate: searchDate,
+      },
+    },
+    create: {
+      keyword: keywords,
+      searchDate: searchDate,
+      totalCount: allPois.length,
+      regionBreakdown: regionBreakdown,
+    },
+    update: {
+      totalCount: allPois.length,
+      regionBreakdown: regionBreakdown,
+    },
+  })
 
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(1)
   console.log(`\n✅ 搜索完成！`)
   console.log(`⏱️  耗时: ${totalTime}秒`)
   console.log(`📊 总共找到: ${allPois.length} 条POI`)
-  console.log(`💾 文件已保存到: ${filePath}\n`)
+  console.log(`💾 数据已保存到数据库\n`)
 
   return {
     keyword: keywords,
     totalResults: allPois.length,
     regionResults,
-    filePath
+    filePath: `database:${keywords}:${searchDate.toISOString().split('T')[0]}` // 兼容性标识
   }
 }
 
 /**
- * 获取已保存的数据 - 自动查找最新的日期文件
+ * 获取已保存的数据 - 从数据库获取最新的搜索记录
  */
-export async function getPoisByKeyword(keywords: string) {
+export async function getPoisByKeyword(keywords: string, date?: string) {
   try {
-    // 列出目录中的所有文件
-    const files = await fs.readdir(DATA_DIR)
+    let searchDate: Date | undefined
 
-    // 找到匹配关键词的所有文件，格式: 关键词_YYYY-MM-DD.json
-    const matchingFiles = files.filter(file => {
-      const prefix = `${keywords}_`
-      return file.startsWith(prefix) && file.endsWith('.json')
+    if (date) {
+      // 指定日期
+      searchDate = new Date(date)
+      searchDate.setHours(0, 0, 0, 0)
+    } else {
+      // 获取最新的搜索记录
+      const latestRecord = await prisma.searchRecord.findFirst({
+        where: { keyword: keywords },
+        orderBy: { searchDate: 'desc' },
+      })
+
+      if (!latestRecord) {
+        throw new Error(`未找到关键词 "${keywords}" 的数据`)
+      }
+
+      searchDate = latestRecord.searchDate
+    }
+
+    // 获取搜索记录
+    const record = await prisma.searchRecord.findUnique({
+      where: {
+        keyword_searchDate: {
+          keyword: keywords,
+          searchDate: searchDate!,
+        },
+      },
     })
 
-    if (matchingFiles.length === 0) {
-      throw new Error(`文件未找到: ${keywords}`)
+    if (!record) {
+      throw new Error(`未找到关键词 "${keywords}" 在日期 "${searchDate!.toISOString().split('T')[0]}" 的数据`)
     }
 
-    // 按文件名排序，获取最新的文件（日期最晚的）
-    const latestFile = matchingFiles.sort().pop()!
-    const filePath = path.join(DATA_DIR, latestFile)
+    // 获取 POI 数据
+    const pois = await prisma.poi.findMany({
+      where: {
+        keyword: keywords,
+        searchDate: searchDate!,
+      },
+      orderBy: { createdAt: 'asc' },
+    })
 
-    const data = await fs.readFile(filePath, 'utf-8')
-    return JSON.parse(data)
+    // 转换为原始格式
+    const poisData = pois.map((poi) => ({
+      id: poi.amapId,
+      name: poi.name,
+      type: poi.type,
+      typecode: poi.typecode,
+      biz_type: poi.bizType,
+      address: poi.address,
+      location: poi.location,
+      tel: poi.tel,
+      distance: poi.distance,
+      business_area: poi.businessArea,
+      navi_poiid: poi.naviPoiid,
+      pcode: poi.province,
+      adcode: poi.city,
+      pname: poi.pname,
+      cityname: poi.cityname,
+      ...(poi.extraData as Record<string, unknown>),
+    }))
+
+    return {
+      keyword: record.keyword,
+      timestamp: record.createdAt.toISOString(),
+      totalCount: record.totalCount,
+      regionBreakdown: (record.regionBreakdown as Array<{ region: string; count: number }>) || [],
+      pois: poisData,
+    }
   } catch (err) {
-    if (err instanceof Error && err.message.includes('文件未找到')) {
+    if (err instanceof Error) {
       throw err
     }
-    throw new Error(`文件未找到: ${keywords}`)
+    throw new Error(`获取数据失败: ${String(err)}`)
   }
 }
 
@@ -359,10 +468,28 @@ export async function getPoisByKeyword(keywords: string) {
  */
 export async function listSavedKeywords() {
   try {
-    const files = await fs.readdir(DATA_DIR)
-    return files
-      .filter(f => f.endsWith('.json'))
-      .map(f => f.replace('.json', ''))
+    const records = await prisma.searchRecord.findMany({
+      select: { keyword: true },
+      distinct: ['keyword'],
+      orderBy: { keyword: 'asc' },
+    })
+    return records.map((r) => r.keyword)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 获取关键词的所有日期列表
+ */
+export async function getKeywordDates(keywords: string): Promise<string[]> {
+  try {
+    const records = await prisma.searchRecord.findMany({
+      where: { keyword: keywords },
+      select: { searchDate: true },
+      orderBy: { searchDate: 'desc' },
+    })
+    return records.map((r) => r.searchDate.toISOString().split('T')[0])
   } catch {
     return []
   }
