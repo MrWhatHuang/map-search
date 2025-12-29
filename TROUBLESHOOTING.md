@@ -104,3 +104,103 @@ AMAP_KEY=your_web_service_api_key_here
 1. 检查 `service/config.ts` 中的 Key 配置
 2. 检查环境变量 `AMAP_KEY` 是否正确设置
 3. 查看后端日志，确认 API 调用详情
+
+## 数据库连接问题
+
+### 错误：数据库连接失败
+
+**错误原因**：
+
+- `DATABASE_URL` 环境变量未配置或配置错误
+- PostgreSQL 服务未启动
+- 数据库不存在
+- 用户名/密码错误
+- 网络连接问题
+
+**解决方案**：
+
+#### 1. 检查环境变量
+
+确认 `.env` 文件中已配置 `DATABASE_URL`：
+
+```bash
+DATABASE_URL=postgresql://用户名:密码@localhost:5432/map_search
+```
+
+#### 2. 检查 PostgreSQL 服务
+
+```bash
+# macOS
+brew services list | grep postgresql
+
+# Linux
+sudo systemctl status postgresql
+
+# 启动服务（如果未启动）
+# macOS
+brew services start postgresql
+
+# Linux
+sudo systemctl start postgresql
+```
+
+#### 3. 检查数据库是否存在
+
+```bash
+# 连接到 PostgreSQL
+psql -U postgres
+
+# 列出所有数据库
+\l
+
+# 如果数据库不存在，创建它
+CREATE DATABASE map_search;
+```
+
+#### 4. 测试连接
+
+```bash
+# 使用 psql 测试连接
+psql $DATABASE_URL
+
+# 或使用 Prisma
+npx prisma db pull
+```
+
+#### 5. 运行数据库迁移
+
+```bash
+# 生成迁移文件
+npx prisma migrate dev --name init
+
+# 或直接应用 schema
+npx prisma db push
+```
+
+### 错误：Prisma Client 未生成
+
+**解决方案**：
+
+```bash
+# 生成 Prisma Client
+npx prisma generate
+```
+
+### 错误：表不存在
+
+**解决方案**：
+
+```bash
+# 运行数据库迁移
+npx prisma migrate dev
+
+# 或直接应用 schema（开发环境）
+npx prisma db push
+```
+
+### 查看数据库
+
+```bash
+# 使用 Prisma Studio 可视化查看数据库
+npx prisma studio
+```

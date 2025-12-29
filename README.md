@@ -14,6 +14,7 @@
 
 - **前端**: Vue 3 + TypeScript + Element Plus + ECharts
 - **后端**: Node.js + Express + TypeScript
+- **数据库**: PostgreSQL + Prisma ORM
 - **地图**: 高德地图 JS API
 
 ## 快速开始
@@ -34,7 +35,7 @@ pnpm install
 cp .env.example .env
 ```
 
-2. 编辑 `.env` 文件，将 `xxxx` 替换为你的实际 API Key：
+2. 编辑 `.env` 文件，将 `xxxx` 替换为你的实际配置：
 
 ```bash
 # 前端：Web 端（JS API）Key
@@ -42,6 +43,9 @@ VITE_AMAP_KEY=你的前端Key
 
 # 后端：Web 服务 Key
 AMAP_KEY=你的后端Key
+
+# PostgreSQL 数据库连接
+DATABASE_URL=postgresql://用户名:密码@localhost:5432/map_search
 ```
 
 **获取 API Key**:
@@ -55,7 +59,34 @@ AMAP_KEY=你的后端Key
 
 > ⚠️ **注意**: 前端和后端需要使用不同类型的 Key，不能混用！详见 [配置说明](./CONFIG.md)
 
-### 3. 启动服务
+### 3. 配置数据库
+
+**重要**: 项目使用 PostgreSQL 数据库存储数据，需要先配置数据库。
+
+1. **安装 PostgreSQL**（如果未安装）：
+   ```bash
+   # macOS
+   brew install postgresql
+   
+   # Ubuntu/Debian
+   sudo apt-get install postgresql
+   ```
+
+2. **创建数据库**：
+   ```bash
+   createdb map_search
+   ```
+
+3. **运行数据库迁移**：
+   ```bash
+   npx prisma migrate dev --name init
+   # 或
+   npx prisma db push
+   ```
+
+详细说明请查看 [数据库迁移指南](./service/docs/DATABASE.md)
+
+### 4. 启动服务
 
 **启动前端开发服务器**:
 
@@ -76,10 +107,17 @@ pnpm dev:server
 ```
 map-search/
 ├── service/              # 后端服务代码
-│   ├── server.ts        # Express 服务器
-│   ├── amap.ts          # 高德地图 API 封装
-│   ├── bulk-search.ts   # 批量搜索逻辑
-│   └── config.ts        # 后端配置
+│   ├── src/              # 核心业务代码
+│   │   ├── server.ts    # Express 服务器
+│   │   ├── amap.ts      # 高德地图 API 封装
+│   │   ├── bulk-search.ts # 批量搜索逻辑
+│   │   ├── db.ts        # 数据库连接
+│   │   └── config.ts    # 后端配置
+│   ├── data/            # 数据文件
+│   ├── scripts/         # 工具脚本
+│   └── docs/            # 文档
+├── prisma/              # Prisma 配置
+│   └── schema.prisma    # 数据库 Schema
 ├── src/                 # 前端源代码
 │   ├── views/           # 页面组件
 │   ├── components/      # 通用组件
@@ -120,7 +158,10 @@ pnpm format
 
 ## 相关文档
 
-- [API 接口文档](./service/API.md)
+- [API 接口文档](./service/docs/API.md)
+- [数据库迁移指南](./service/docs/DATABASE.md)
+- [配置说明](./CONFIG.md)
+- [故障排查指南](./TROUBLESHOOTING.md)
 - [AI 项目描述文档](./docs/AI_DESCRIPTION.md)
 
 ## Recommended IDE Setup

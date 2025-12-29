@@ -30,11 +30,14 @@
 - **框架**: Express.js
 - **语言**: TypeScript (Node.js)
 - **运行环境**: Node.js ^20.19.0 || >=22.12.0
+- **数据库**: PostgreSQL
+- **ORM**: Prisma
 
 ### 核心依赖
 
 - `cors`: 跨域支持
 - `express`: HTTP 服务器
+- `prisma` / `@prisma/client`: 数据库 ORM
 - `element-plus`: UI 组件
 - `echarts` / `vue-echarts`: 数据可视化
 - `pinia`: 状态管理
@@ -45,29 +48,41 @@
 ```
 map-search/
 ├── service/              # 后端服务代码
-│   ├── server.ts        # Express 服务器主文件
-│   ├── amap.ts          # 高德地图 API 封装
-│   ├── bulk-search.ts   # 批量搜索核心逻辑
-│   ├── task-manager.ts  # 任务管理器（进度跟踪）
-│   ├── config.ts        # 配置文件（API Key、并发数等）
-│   ├── regions.json     # 全国地区列表
-│   └── API.md           # API 接口文档
+│   ├── src/             # 核心业务代码
+│   │   ├── server.ts    # Express 服务器主文件
+│   │   ├── amap.ts      # 高德地图 API 封装
+│   │   ├── bulk-search.ts # 批量搜索核心逻辑
+│   │   ├── task-manager.ts # 任务管理器（进度跟踪）
+│   │   ├── db.ts        # 数据库连接（Prisma Client）
+│   │   └── config.ts    # 配置文件（API Key、并发数等）
+│   ├── data/            # 数据文件
+│   │   ├── regions.json # 全国省份列表
+│   │   ├── cities.json  # 城市列表
+│   │   └── province-to-cities.json # 省份到城市映射
+│   ├── scripts/         # 工具脚本
+│   │   ├── convert-regions.ts # Excel 转 JSON
+│   │   └── migrate-json-to-db.ts # JSON 数据迁移脚本
+│   └── docs/            # 文档
+│       ├── API.md       # API 接口文档
+│       └── DATABASE.md  # 数据库迁移指南
+├── prisma/              # Prisma 配置
+│   └── schema.prisma    # 数据库 Schema
 ├── src/                 # 前端源代码
 │   ├── views/           # 页面组件
 │   │   ├── Home.vue            # 首页（功能菜单）
-│   │   ├── DataRequest.vue     # 数据爬取页面（占位）
+│   │   ├── DataRequest.vue     # 数据爬取页面
 │   │   └── DataView/           # 数据展示模块
 │   │       ├── index.vue                    # 主页面
 │   │       └── components/
 │   │           ├── ProvinceTable.vue        # 省份表格组件
 │   │           └── CityDetailsModal.vue     # 城市详情弹窗
+│   ├── components/      # 通用组件
+│   │   └── AmapView.vue # 高德地图组件
 │   ├── api.ts           # API 请求封装（支持 alova 回退到 fetch）
 │   ├── router/          # 路由配置
 │   ├── stores/          # Pinia 状态管理
 │   ├── App.vue          # 根组件
 │   └── main.ts          # 入口文件
-├── public/
-│   └── poi-data/        # POI 数据存储目录（JSON 文件）
 ├── docs/                # 文档目录
 ├── package.json         # 项目配置和依赖
 └── vite.config.ts      # Vite 构建配置
@@ -99,17 +114,24 @@ map-search/
   - 支持并发控制（maxConcurrency）
   - 支持任务进度跟踪（taskId）
   - 自动翻页获取所有数据
-  - 结果保存为 JSON 文件（格式: `关键词_YYYY-MM-DD.json`）
+  - 结果保存到 PostgreSQL 数据库（按关键词和日期组织）
 
 **数据流程**:
 
 1. 遍历所有地区列表
 2. 对每个地区并发搜索（可配置并发数）
 3. 每个地区内部支持多页并发（maxPageConcurrency = 2）
-4. 合并所有结果并保存到 `public/poi-data/`
-5. 返回统计信息和文件路径
+4. 合并所有结果并批量保存到 PostgreSQL 数据库
+5. 创建搜索记录（包含统计信息）
+6. 返回统计信息
 
-**数据文件结构**:
+**数据库表结构**:
+
+- **`pois` 表**：存储所有 POI 数据（包含经纬度、地址、类型等）
+- **`search_records` 表**：存储搜索记录元数据（关键词、日期、总数、地区统计）
+- **`search_tasks` 表**：存储搜索任务状态（可选）
+
+**数据查询结构**:
 
 ```json
 {
@@ -171,10 +193,10 @@ map-search/
 
 #### 数据获取
 
-- `GET /api/saved-keywords` - 列出所有已保存的关键词
-- `GET /api/saved-files/:keywords` - 列出关键词的可用日期文件
-- `GET /api/saved-pois/:keywords` - 获取最新日期的数据
-- `GET /api/saved-pois/:keywords/:date` - 获取指定日期的数据
+- `GET /api/saved-keywords` - 列出数据库中所有已保存的关键词
+- `GET /api/saved-files/:keywords` - 列出关键词在数据库中的可用日期
+- `GET /api/saved-pois/:keywords` - 从数据库获取最新日期的数据
+- `GET /api/saved-pois/:keywords/:date` - 从数据库获取指定日期的数据
 
 #### 其他
 
@@ -203,9 +225,9 @@ map-search/
 
 **数据流**:
 
-1. 加载已保存的关键词列表
-2. 选择关键词后加载可用日期
-3. 选择日期后加载对应数据
+1. 从数据库加载已保存的关键词列表
+2. 选择关键词后从数据库加载可用日期
+3. 选择日期后从数据库查询对应数据
 4. 展示省份统计表格
 5. 点击省份查看城市详情
 
@@ -302,9 +324,11 @@ pnpm format
    - 任务失败状态跟踪
 
 3. **数据存储**:
-   - 使用 JSON 文件存储（便于查看和调试）
-   - 文件名包含日期，支持多版本数据
-   - 自动选择最新日期文件
+   - 使用 PostgreSQL 数据库存储（高性能、可扩展）
+   - 数据按关键词和日期组织，支持多版本数据
+   - 自动选择最新日期数据
+   - 支持批量插入和索引优化
+   - 提供数据迁移脚本（从 JSON 文件迁移）
 
 4. **任务管理**:
    - 异步任务支持（不阻塞 HTTP 响应）
@@ -317,9 +341,9 @@ pnpm format
 
 A: 修改 `service/config.ts` 中的 `bulkSearch` 配置，或通过 API 请求参数传递。
 
-### Q: 数据文件保存在哪里？
+### Q: 数据保存在哪里？
 
-A: `public/poi-data/` 目录，格式为 `关键词_YYYY-MM-DD.json`
+A: 数据存储在 PostgreSQL 数据库中。如果需要迁移现有的 JSON 文件，可以使用 `service/scripts/migrate-json-to-db.ts` 脚本。
 
 ### Q: 如何查看任务进度？
 
@@ -346,21 +370,26 @@ A: 前端使用 `body?.data ?? body` 兼容处理，因为 alova 可能自动解
 
 4. **用户认证**: 如果需要多用户支持，可以添加登录系统
 
-5. **数据库**: 如果数据量大，可以考虑迁移到数据库（MongoDB、PostgreSQL 等）
+5. **数据导出**: 支持导出为 Excel、CSV 等格式
 
 ## 注意事项
 
 1. **API Key 安全**: `service/config.ts` 中的高德 API Key 应该通过环境变量管理，不要提交到版本控制
-2. **并发限制**: 高德 API 有并发限制，需要合理设置并发数和延迟
-3. **数据量**: 批量搜索可能产生大量数据，注意磁盘空间
-4. **任务清理**: 任务管理器会自动清理 1 小时前的任务，如需保留更久可调整
+2. **数据库配置**: 必须配置 `DATABASE_URL` 环境变量，服务启动时会自动测试连接
+3. **并发限制**: 高德 API 有并发限制，需要合理设置并发数和延迟
+4. **数据量**: 批量搜索可能产生大量数据，注意数据库存储空间和性能
+5. **任务清理**: 任务管理器会自动清理 1 小时前的任务，如需保留更久可调整
+6. **数据库迁移**: 首次使用需要运行 `npx prisma migrate dev` 创建数据库表
 
 ## 相关文档
 
-- `service/API.md`: 详细的 API 接口文档
+- `service/docs/API.md`: 详细的 API 接口文档
+- `service/docs/DATABASE.md`: 数据库迁移指南
 - `README.md`: 项目基础说明
+- `CONFIG.md`: 配置说明
+- `TROUBLESHOOTING.md`: 故障排查指南
 
 ---
 
-**最后更新**: 2025-12-05  
+**最后更新**: 2025-12-08  
 **维护者**: 项目开发团队

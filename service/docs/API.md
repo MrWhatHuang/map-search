@@ -6,7 +6,7 @@
 
 - 服务器默认基址：`http://localhost:3000`
 - 大部分接口返回一个 envelope：`{ code: number, data: any, message: string }`。在部分客户端封装（如 alova）中可能直接返回 `data`，前端需兼容两种形式。
-- 数据文件位于项目：`public/poi-data`，保存格式为 `关键词_YYYY-MM-DD.json`。
+- **数据存储**：项目使用 PostgreSQL 数据库存储 POI 数据，不再使用 JSON 文件。数据按关键词和日期组织，支持多版本数据查询。
 
 ---
 
@@ -118,23 +118,23 @@
     ```
 
 - `GET /api/saved-keywords`
-  - 描述：列出 `public/poi-data` 中所有已保存的文件名（去掉后缀）。
-  - 返回：`{ code:200, data: string[], message: '成功' }`（例如：`["古茗_2025-12-05","哪吒仙饮_2025-12-05"]`）
+  - 描述：列出数据库中所有已保存的关键词（从 `search_records` 表查询）。
+  - 返回：`{ code:200, data: string[], message: '成功' }`（例如：`["古茗","哪吒仙饮"]`）
 
 - `GET /api/saved-files/:keywords`
-  - 描述：列出某关键词可用的日期文件（返回 `YYYY-MM-DD` 数组，按降序排序，最新在前）。
+  - 描述：列出某关键词在数据库中的可用日期（返回 `YYYY-MM-DD` 数组，按降序排序，最新在前）。
   - 返回：`{ code:200, data: string[], message: '成功' }`
 
 - `GET /api/saved-pois/:keywords`
-  - 描述：读取某关键词最新的已保存数据（自动选取目录中最新的文件）。
-  - 返回 data：保存文件的完整内容，结构示例见下。
+  - 描述：从数据库读取某关键词最新的已保存数据（自动选取最新的搜索日期）。
+  - 返回 data：包含 `keyword`, `timestamp`, `totalCount`, `regionBreakdown`, `pois` 的完整数据。
   - **重要**：如果数据中的 `regionBreakdown` 包含城市级别数据，会自动转换为省份级别（只保留省/直辖市）。
 
 - `GET /api/saved-pois/:keywords/:date`
-  - 描述：按指定日期读取保存文件（`date` 格式 `YYYY-MM-DD`）。
-  - 返回：`{ code:200, data: <fileContent>, message: '成功' }`。
+  - 描述：从数据库按指定日期读取数据（`date` 格式 `YYYY-MM-DD`）。
+  - 返回：`{ code:200, data: <完整数据>, message: '成功' }`。
   - **重要**：如果数据中的 `regionBreakdown` 包含城市级别数据，会自动转换为省份级别（只保留省/直辖市）。
-  - 如果文件不存在，返回 `404`。
+  - 如果数据不存在，返回 `404`。
 
 - `GET /api/test/concurrent`
   - 描述：用于测试并发请求高德API的能力（调试用）。
@@ -174,9 +174,21 @@
 
 ---
 
-**保存文件（数据）结构说明**
+**数据存储结构说明**
 
-批量搜索保存到 `public/poi-data/关键词_YYYY-MM-DD.json`，文件中 JSON 的主要字段示例：
+批量搜索的数据存储在 PostgreSQL 数据库中，主要包含以下表：
+
+1. **`pois` 表**：存储所有 POI 数据
+   - 字段包括：`amapId`, `keyword`, `searchDate`, `name`, `type`, `location`, `longitude`, `latitude`, `pname`, `cityname` 等
+   - 索引：`keyword + searchDate`, `province + city`, `longitude + latitude`
+
+2. **`search_records` 表**：存储搜索记录元数据
+   - 字段包括：`keyword`, `searchDate`, `totalCount`, `regionBreakdown`（JSON格式）
+   - 唯一约束：`keyword + searchDate`
+
+3. **`search_tasks` 表**：存储搜索任务状态（可选）
+
+**API 返回的数据结构**：
 
 ```json
 {
@@ -188,17 +200,17 @@
     {"region": "浙江省", "count": 300}
   ],
   "pois": [
-    {"id": "...", "name": "门店A", "type": "餐饮", ...},
+    {"id": "...", "name": "门店A", "type": "餐饮", "location": "116.xxx,39.xxx", ...},
     ...
   ]
 }
 ```
 
 - `keyword`：关键词字符串
-- `timestamp`：文件生成时间（ISO 字符串）
+- `timestamp`：数据创建时间（ISO 字符串）
 - `totalCount`：合计 POI 数量
-- `regionBreakdown`：按地区汇总，用于前端展示柱状图（字段 `region`, `count`）
-- `pois`：完整 POI 列表
+- `regionBreakdown`：按省份汇总，用于前端展示柱状图（字段 `region`, `count`）
+- `pois`：完整 POI 列表（从数据库查询并转换）
 
 ---
 

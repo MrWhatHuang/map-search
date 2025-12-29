@@ -68,9 +68,36 @@ pnpm tsx service/scripts/province-to-cities.ts
 - **generate-city-mapping.ts**: 根据 adcode 规则生成省份到城市映射
 - **province-to-cities.ts**: 从 cities-detail.json 生成省份到城市映射
 
+## 数据库配置
+
+项目使用 PostgreSQL 数据库存储 POI 数据。
+
+### 配置步骤
+
+1. **安装 PostgreSQL**（如果未安装）
+2. **创建数据库**：
+   ```bash
+   createdb map_search
+   ```
+3. **配置环境变量**：
+   在 `.env` 文件中添加：
+   ```env
+   DATABASE_URL=postgresql://用户名:密码@localhost:5432/map_search
+   ```
+4. **运行数据库迁移**：
+   ```bash
+   npx prisma migrate dev --name init
+   # 或
+   npx prisma db push
+   ```
+
+详细说明请参考 `docs/DATABASE.md`。
+
 ## 注意事项
 
 1. 所有数据文件位于 `data/` 目录，脚本生成的数据会自动保存到该目录
 2. Excel 源文件 `AMap_adcode_citycode.xlsx` 位于 service 根目录
 3. API 文档位于 `docs/API.md`
-4. 服务器启动脚本路径已更新为 `service/src/server.ts`
+4. 数据库迁移文档位于 `docs/DATABASE.md`
+5. 服务器启动脚本路径已更新为 `service/src/server.ts`
+6. **重要**：启动服务前必须配置 `DATABASE_URL` 环境变量
