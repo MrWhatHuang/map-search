@@ -43,3 +43,4 @@ coverage
 __screenshots__/
 
 public/poi-data/*
+/src/generated/prisma

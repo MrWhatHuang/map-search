@@ -1,0 +1,77 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// POI 数据表
+model Poi {
+  id        String   @id @default(cuid())
+  amapId    String   // 高德地图POI的ID
+  keyword   String   // 搜索关键词
+  searchDate DateTime @db.Date // 搜索日期
+  name      String   // POI名称
+  type      String?  // POI类型
+  typecode  String?  // 类型代码
+  bizType   String?  @map("biz_type") // 业务类型
+  address   String?  // 地址
+  location  String   // 经纬度 "经度,纬度"
+  longitude Float?   // 经度（用于地理查询）
+  latitude  Float?   // 纬度（用于地理查询）
+  tel       String?  // 电话
+  distance  String?  // 距离
+  businessArea String? @map("business_area") // 商圈
+  naviPoiid String?  @map("navi_poiid") // 导航POI ID
+  province  String?  // 省份
+  city      String?  // 城市
+  pname     String?  // 省份名
+  cityname  String?  // 城市名
+  extraData Json?    @map("extra_data") // 其他扩展字段（JSON格式）
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  // 索引
+  @@index([keyword, searchDate])
+  @@index([province, city])
+  @@index([longitude, latitude])
+  @@map("pois")
+}
+
+// 搜索任务表
+model SearchTask {
+  id              String   @id @default(cuid())
+  keyword         String   // 搜索关键词
+  status          String   // pending | running | completed | failed
+  totalCities     Int      @default(0) @map("total_cities")
+  completedCities Int      @default(0) @map("completed_cities")
+  totalResults    Int      @default(0) @map("total_results")
+  regions         String[] // 城市列表
+  startTime       DateTime @default(now()) @map("start_time")
+  endTime         DateTime? @map("end_time")
+  error           String?  // 错误信息
+  filePath        String?  @map("file_path") // 保留用于兼容（可选）
+  
+  @@index([keyword])
+  @@index([status])
+  @@map("search_tasks")
+}
+
+// 搜索记录表（记录每次搜索的元数据）
+model SearchRecord {
+  id          String   @id @default(cuid())
+  keyword     String   // 搜索关键词
+  searchDate  DateTime @db.Date @map("search_date") // 搜索日期
+  totalCount  Int      @default(0) @map("total_count") // 总POI数
+  regionBreakdown Json? @map("region_breakdown") // 按省份统计（JSON格式）
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  // 一个关键词+日期组合唯一
+  @@unique([keyword, searchDate])
+  @@index([keyword])
+  @@index([searchDate])
+  @@map("search_records")
+}
